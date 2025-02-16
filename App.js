@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, StyleSheet, TextInput, Alert, ScrollView } from 'react-native';
+import { View, Text, Button, StyleSheet, TextInput, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import * as Network from 'expo-network';
 import * as Location from 'expo-location';
 
 export default function App() {
-  // 'mode' puede ser: 'menu', 'server' o 'client'
   const [mode, setMode] = useState('menu');
   const [serverIp, setServerIp] = useState('');
   const [ws, setWs] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Desconectado');
   const [messages, setMessages] = useState([]);
   const [clientMessage, setClientMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // Estado para controlar el indicador de carga
 
-  // Cuando se entra en modo "server", se obtiene la IP local del dispositivo
   useEffect(() => {
     if (mode === 'server') {
       getOwnIp();
@@ -23,78 +22,80 @@ export default function App() {
   }, [mode]);
 
   const getOwnIp = async () => {
-    const ip = await Network.getIpAddressAsync();
-    setServerIp(ip);
+    try {
+      setIsLoading(true);
+      const ip = await Network.getIpAddressAsync();
+      setServerIp(ip);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo obtener la IP local.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // Función para conectarse como "Servidor"
-  // En este modo, la app se conecta a un servidor WebSocket en ws://[su propia IP]:8080
-  // (Se asume que ya hay un servidor WebSocket corriendo en ese dispositivo o en la red)
   const connectAsServer = () => {
-    const url = 'ws://${serverIp}:8080';
+    setIsLoading(true);
+    const url = ` ws://${serverIp}:8080`;
     const socket = new WebSocket(url);
 
     socket.onopen = () => {
-      console.log('Servidor: Conectado a WS');
       setConnectionStatus('Conectado');
-  
+      setIsLoading(false);
     };
 
     socket.onmessage = (event) => {
-      console.log('Servidor: Mensaje recibido:', event.data);
       setMessages(prev => [...prev, event.data]);
     };
 
     socket.onerror = (error) => {
-      console.error('Servidor: Error en WS:', error);
       setConnectionStatus('Error');
+      setIsLoading(false);
+      Alert.alert('Error de conexión', 'No se pudo conectar al servidor.');
     };
 
     socket.onclose = () => {
-      console.log('Servidor: Conexión WS cerrada');
       setConnectionStatus('Desconectado');
+      setIsLoading(false);
     };
 
     setWs(socket);
   };
 
-  // Función para conectarse como "Cliente"
-  // El usuario debe ingresar la IP del dispositivo servidor.
   const connectAsClient = () => {
     if (!serverIp) {
       Alert.alert('Error', 'Ingresa la IP del servidor.');
       return;
     }
-    const url = 'ws://${serverIp}:8080';
+
+    setIsLoading(true);
+    const url = ` ws://${serverIp}:8080`;
     const socket = new WebSocket(url);
 
     socket.onopen = () => {
-      console.log('Cliente: Conectado a WS');
       setConnectionStatus('Conectado');
+      setIsLoading(false);
       Alert.alert('Conexión', 'Conectado correctamente al servidor.');
     };
 
     socket.onmessage = (event) => {
       console.log('Cliente: Mensaje recibido:', event.data);
-      // Aquí se podría actualizar un estado para mostrar mensajes, si se desea.
     };
 
     socket.onerror = (error) => {
-      console.error('Cliente: Error en WS:', error);
       setConnectionStatus('Error');
-      Alert.alert('Error', 'Error al conectar con el servidor.');
+      setIsLoading(false);
+      Alert.alert('Error de conexión', 'No se pudo conectar al servidor.');
     };
 
     socket.onclose = () => {
-      console.log('Cliente: Conexión WS cerrada');
       setConnectionStatus('Desconectado');
-      Alert.alert('Conexión', 'Conexión con el servidor cerrada.');
+      setIsLoading(false);
+      Alert.alert('Conexión', 'Conexión cerrada.');
     };
 
     setWs(socket);
   };
 
-  // Función para enviar mensaje (desde cliente)
   const sendClientMessage = () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(clientMessage);
@@ -104,7 +105,6 @@ export default function App() {
     }
   };
 
-  // Función para enviar la ubicación (desde cliente)
   const sendClientLocation = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
@@ -113,7 +113,7 @@ export default function App() {
     }
     let loc = await Location.getCurrentPositionAsync({});
     const { latitude, longitude } = loc.coords;
-    const locMessage = 'Ubicación: Latitud ${latitude}, Longitud ${longitude}';
+    const locMessage = `Ubicación: Latitud ${latitude}, Longitud ${longitude}`;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(locMessage);
     } else {
@@ -121,7 +121,6 @@ export default function App() {
     }
   };
 
-  // Función para desconectar y regresar al menú principal
   const disconnectAndGoBack = () => {
     if (ws) ws.close();
     setWs(null);
@@ -131,7 +130,6 @@ export default function App() {
     setMessages([]);
   };
 
-  // Renderizamos según el modo
   if (mode === 'menu') {
     return (
       <View style={styles.container}>
@@ -150,7 +148,9 @@ export default function App() {
         <Text style={styles.label}>IP del Servidor: {serverIp}</Text>
         <Text style={styles.label}>Estado de Conexión: {connectionStatus}</Text>
         <View style={styles.spacer} />
-        {!ws ? (
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#0000ff" />
+        ) : !ws ? (
           <Button title="Conectar (Esperar mensajes)" onPress={connectAsServer} />
         ) : null}
         <View style={styles.spacer} />
@@ -178,7 +178,9 @@ export default function App() {
           autoCapitalize="none"
         />
         <View style={styles.spacer} />
-        {!ws ? (
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#0000ff" />
+        ) : !ws ? (
           <Button title="Conectar al Servidor" onPress={connectAsClient} />
         ) : (
           <>
