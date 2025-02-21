@@ -9,7 +9,7 @@ export default function App() {
   const [serverIp, setServerIp] = useState('');
   const [ws, setWs] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Desconectado');
-  const [isLoading, setIsLoading] = useState(false); // Estado para controlar el indicador de carga
+  const [isLoading, setIsLoading] = useState(false);
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
   const [message, setMessage] = useState('');
@@ -48,42 +48,35 @@ export default function App() {
     }
   };
 
-  const getLocation = async () => {
-    if (locationPermission) {
-      try {
-        const location = await Location.getCurrentPositionAsync({});
-        setLatitude(location.coords.latitude);
-        setLongitude(location.coords.longitude);
-      } catch (error) {
-        Alert.alert('Error', 'No se pudo obtener la ubicación.');
-      }
-    } else {
-      Alert.alert('Permiso Denegado', 'El permiso para acceder a la ubicación no ha sido otorgado.');
-    }
-  };
-
   const startServer = () => {
     setIsLoading(true);
-    const server = TcpSocket.createServer((socket) => {
-      console.log('Cliente conectado');
-      
-      socket.on('data', (data) => {
-        console.log('Mensaje recibido:', data.toString());
+    try {
+      const server = TcpSocket.createServer((socket) => {
+        console.log('Cliente conectado');
+
+        socket.on('data', (data) => {
+          console.log('Mensaje recibido:', data.toString());
+        });
+
+        socket.on('close', () => {
+          console.log('Conexión cerrada');
+        });
+
+        socket.write('¡Conexión exitosa!');
       });
 
-      socket.on('close', () => {
-        console.log('Conexión cerrada');
+      server.listen(5000, serverIp, () => {
+        console.log('Servidor iniciado en:', serverIp);
+        setConnectionStatus('Servidor activo');
+        setIsLoading(false);
       });
 
-      socket.write('¡Conexión exitosa!');
-    });
-
-    server.listen(8080, '0.0.0.0', () => {
-      setConnectionStatus('Servidor activo');
+      setWs(server);
+    } catch (error) {
+      console.error('Error al iniciar el servidor:', error);
+      Alert.alert('Error', 'No se pudo iniciar el servidor.');
       setIsLoading(false);
-    });
-
-    setWs(server);
+    }
   };
 
   const connectAsClient = () => {
@@ -93,7 +86,7 @@ export default function App() {
     }
 
     setIsLoading(true);
-    const client = TcpSocket.createConnection({ port: 8080, host: serverIp }, () => {
+    const client = TcpSocket.createConnection({ port: 5000, host: serverIp }, () => {
       console.log('Conectado al servidor');
       setConnectionStatus('Conectado');
       setIsLoading(false);
@@ -161,9 +154,7 @@ export default function App() {
         {isLoading ? (
           <ActivityIndicator size="large" color="#0000ff" />
         ) : (
-          !ws && (
-            <Button title="Iniciar Servidor" onPress={startServer} />
-          )
+          !ws && <Button title="Iniciar Servidor" onPress={startServer} />
         )}
         <View style={styles.spacer} />
         <Button title="Regresar al menú principal" onPress={disconnectAndGoBack} />
@@ -187,9 +178,7 @@ export default function App() {
         {isLoading ? (
           <ActivityIndicator size="large" color="#0000ff" />
         ) : (
-          !ws && (
-            <Button title="Conectar al Servidor" onPress={connectAsClient} />
-          )
+          !ws && <Button title="Conectar al Servidor" onPress={connectAsClient} />
         )}
         <View style={styles.spacer} />
         {ws && (
@@ -215,41 +204,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 18,
-    marginVertical: 10,
-  },
-  input: {
-    height: 40,
-    borderColor: 'gray',
-    borderWidth: 1,
-    width: '100%',
-    marginBottom: 10,
-    paddingHorizontal: 10,
-    textAlign: 'center',
-  },
-  spacer: {
-    height: 15,
-  },
-  locationButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    marginVertical: 10,
-    borderRadius: 5,
-  },
-  locationButtonText: {
-    color: '#fff',
-    fontSize: 16,
-  },
+  container: { flex: 1, padding: 20, backgroundColor: '#fff', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
+  label: { fontSize: 18, marginVertical: 10 },
+  input: { height: 40, borderColor: 'gray', borderWidth: 1, width: '100%', marginBottom: 10, paddingHorizontal: 10, textAlign: 'center' },
+  spacer: { height: 15 },
+  locationButton: { backgroundColor: '#4CAF50', padding: 10, marginVertical: 10, borderRadius: 5 },
+  locationButtonText: { color: '#fff', fontSize: 16 },
 });
