@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, StyleSheet, TextInput, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, Button, StyleSheet, TextInput, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import TcpSocket from 'react-native-tcp-socket';
 import * as Network from 'expo-network';
 import * as Location from 'expo-location';
 
@@ -8,13 +9,18 @@ export default function App() {
   const [serverIp, setServerIp] = useState('');
   const [ws, setWs] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Desconectado');
-  const [messages, setMessages] = useState([]);
-  const [clientMessage, setClientMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false); // Estado para controlar el indicador de carga
+  const [latitude, setLatitude] = useState(null);
+  const [longitude, setLongitude] = useState(null);
+  const [message, setMessage] = useState('');
+  const [locationPermission, setLocationPermission] = useState(false);
 
   useEffect(() => {
     if (mode === 'server') {
       getOwnIp();
+    }
+    if (mode === 'client') {
+      getLocationPermission();
     }
     return () => {
       if (ws) ws.close();
@@ -33,32 +39,51 @@ export default function App() {
     }
   };
 
-  const connectAsServer = () => {
+  const getLocationPermission = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      setLocationPermission(true);
+    } else {
+      Alert.alert('Error', 'Se requiere permiso para acceder a la ubicación.');
+    }
+  };
+
+  const getLocation = async () => {
+    if (locationPermission) {
+      try {
+        const location = await Location.getCurrentPositionAsync({});
+        setLatitude(location.coords.latitude);
+        setLongitude(location.coords.longitude);
+      } catch (error) {
+        Alert.alert('Error', 'No se pudo obtener la ubicación.');
+      }
+    } else {
+      Alert.alert('Permiso Denegado', 'El permiso para acceder a la ubicación no ha sido otorgado.');
+    }
+  };
+
+  const startServer = () => {
     setIsLoading(true);
-    const url = ` ws://${serverIp}:8080`;
-    const socket = new WebSocket(url);
+    const server = TcpSocket.createServer((socket) => {
+      console.log('Cliente conectado');
+      
+      socket.on('data', (data) => {
+        console.log('Mensaje recibido:', data.toString());
+      });
 
-    socket.onopen = () => {
-      setConnectionStatus('Conectado');
+      socket.on('close', () => {
+        console.log('Conexión cerrada');
+      });
+
+      socket.write('¡Conexión exitosa!');
+    });
+
+    server.listen(8080, '0.0.0.0', () => {
+      setConnectionStatus('Servidor activo');
       setIsLoading(false);
-    };
+    });
 
-    socket.onmessage = (event) => {
-      setMessages(prev => [...prev, event.data]);
-    };
-
-    socket.onerror = (error) => {
-      setConnectionStatus('Error');
-      setIsLoading(false);
-      Alert.alert('Error de conexión', 'No se pudo conectar al servidor.');
-    };
-
-    socket.onclose = () => {
-      setConnectionStatus('Desconectado');
-      setIsLoading(false);
-    };
-
-    setWs(socket);
+    setWs(server);
   };
 
   const connectAsClient = () => {
@@ -68,56 +93,42 @@ export default function App() {
     }
 
     setIsLoading(true);
-    const url = ` ws://${serverIp}:8080`;
-    const socket = new WebSocket(url);
-
-    socket.onopen = () => {
+    const client = TcpSocket.createConnection({ port: 8080, host: serverIp }, () => {
+      console.log('Conectado al servidor');
       setConnectionStatus('Conectado');
       setIsLoading(false);
-      Alert.alert('Conexión', 'Conectado correctamente al servidor.');
-    };
+      client.write('¡Hola desde el cliente!');
+    });
 
-    socket.onmessage = (event) => {
-      console.log('Cliente: Mensaje recibido:', event.data);
-    };
+    client.on('data', (data) => {
+      console.log('Respuesta del servidor:', data.toString());
+      setConnectionStatus('Mensaje recibido: ' + data.toString());
+    });
 
-    socket.onerror = (error) => {
-      setConnectionStatus('Error');
+    client.on('error', (err) => {
+      setConnectionStatus('Error al conectar');
       setIsLoading(false);
       Alert.alert('Error de conexión', 'No se pudo conectar al servidor.');
-    };
+    });
 
-    socket.onclose = () => {
-      setConnectionStatus('Desconectado');
-      setIsLoading(false);
-      Alert.alert('Conexión', 'Conexión cerrada.');
-    };
-
-    setWs(socket);
+    setWs(client);
   };
 
-  const sendClientMessage = () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(clientMessage);
-      setClientMessage('');
-    } else {
-      Alert.alert('Error', 'La conexión no está abierta.');
+  const sendMessage = () => {
+    if (ws) {
+      ws.write(message);
+      setMessage('');
     }
   };
 
-  const sendClientLocation = async () => {
-    let { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Permiso de ubicación denegado');
-      return;
-    }
-    let loc = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = loc.coords;
-    const locMessage = `Ubicación: Latitud ${latitude}, Longitud ${longitude}`;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(locMessage);
+  const sendLocation = () => {
+    if (latitude && longitude) {
+      const locationData = 'Latitud: ${latitude}, Longitud: ${longitude}';
+      if (ws) {
+        ws.write(locationData);
+      }
     } else {
-      Alert.alert('Error', 'La conexión no está abierta.');
+      Alert.alert('Ubicación no disponible', 'No se ha obtenido la ubicación aún.');
     }
   };
 
@@ -127,7 +138,6 @@ export default function App() {
     setConnectionStatus('Desconectado');
     setMode('menu');
     setServerIp('');
-    setMessages([]);
   };
 
   if (mode === 'menu') {
@@ -150,15 +160,11 @@ export default function App() {
         <View style={styles.spacer} />
         {isLoading ? (
           <ActivityIndicator size="large" color="#0000ff" />
-        ) : !ws ? (
-          <Button title="Conectar (Esperar mensajes)" onPress={connectAsServer} />
-        ) : null}
-        <View style={styles.spacer} />
-        <ScrollView style={styles.messagesContainer}>
-          {messages.map((msg, index) => (
-            <Text key={index} style={styles.messageText}>{msg}</Text>
-          ))}
-        </ScrollView>
+        ) : (
+          !ws && (
+            <Button title="Iniciar Servidor" onPress={startServer} />
+          )
+        )}
         <View style={styles.spacer} />
         <Button title="Regresar al menú principal" onPress={disconnectAndGoBack} />
       </View>
@@ -180,21 +186,25 @@ export default function App() {
         <View style={styles.spacer} />
         {isLoading ? (
           <ActivityIndicator size="large" color="#0000ff" />
-        ) : !ws ? (
-          <Button title="Conectar al Servidor" onPress={connectAsClient} />
         ) : (
+          !ws && (
+            <Button title="Conectar al Servidor" onPress={connectAsClient} />
+          )
+        )}
+        <View style={styles.spacer} />
+        {ws && (
           <>
             <TextInput
               style={styles.input}
-              placeholder="Escribe un mensaje"
-              value={clientMessage}
-              onChangeText={setClientMessage}
-              onSubmitEditing={sendClientMessage}
+              placeholder="Escribe tu mensaje"
+              value={message}
+              onChangeText={setMessage}
             />
-            <View style={styles.spacer} />
-            <Button title="Enviar Mensaje" onPress={sendClientMessage} />
-            <View style={styles.spacer} />
-            <Button title="Enviar mi ubicación" onPress={sendClientLocation} />
+            <Button title="Enviar Mensaje" onPress={sendMessage} />
+            <TouchableOpacity style={styles.locationButton} onPress={getLocation}>
+              <Text style={styles.locationButtonText}>Obtener Ubicación</Text>
+            </TouchableOpacity>
+            <Button title="Enviar Ubicación" onPress={sendLocation} />
           </>
         )}
         <View style={styles.spacer} />
@@ -232,16 +242,14 @@ const styles = StyleSheet.create({
   spacer: {
     height: 15,
   },
-  messagesContainer: {
-    width: '100%',
-    maxHeight: 200,
-    borderWidth: 1,
-    borderColor: 'gray',
+  locationButton: {
+    backgroundColor: '#4CAF50',
     padding: 10,
     marginVertical: 10,
+    borderRadius: 5,
   },
-  messageText: {
+  locationButtonText: {
+    color: '#fff',
     fontSize: 16,
-    marginBottom: 5,
   },
 });
