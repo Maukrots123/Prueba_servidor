@@ -77,7 +77,7 @@ export default function App() {
     const server = TcpSocket.createServer((clientSocket) => {
       clientSocket.on('data', (data) => {
         const receivedData = data.toString();
-        setReceivedMessages(prev => [...prev, receivedData]);
+        setReceivedMessages(prev => [...prev, data.toString()]);
       });
 
       clientSocket.on('close', () => {
@@ -86,7 +86,7 @@ export default function App() {
     });
 
        // Nuevo: Manejo detallado de errores del servidor
-       newServer.on('error', (error) => {
+       server.on('error', (error) => {
         let errorMessage = 'Error del servidor: ';
         switch(error.code) {
           case 'EADDRINUSE':
@@ -103,11 +103,11 @@ export default function App() {
       });
   
       // Modificado: Escucha en todas las interfaces de red
-      newServer.listen(5000, '0.0.0.0', () => {
+      server.listen(5000, '0.0.0.0', () => {
         console.log('Servidor activo en:', serverIp + ':5000');
-        setConnectionStatus('Escuchando en ${serverIp}:5000');
+        setConnectionStatus(`Escuchando en ${serverIp}:5000`);
         setIsLoading(false);
-        setSocket(newServer);
+        setSocket(server);
       });
   };
 
@@ -151,7 +151,7 @@ export default function App() {
 
   const sendLocation = () => {
     if (latitude && longitude) {
-      sendData('[UBICACIÓN] Lat: ${latitude}, Long: ${longitude}');
+      sendData(`[UBICACIÓN] Lat: ${latitude}, Long: ${longitude}`);
     } else {
       Alert.alert('Error', 'Primero obtén tu ubicación');
     }
