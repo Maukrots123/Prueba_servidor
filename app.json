@@ -20,7 +20,13 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.mauricio1.servidorreactnativemetacriticapp"
+      "package": "com.mauricio1.servidorreactnativemetacriticapp",
+      "permissions": [  
+        "ACCESS_NETWORK_STATE",
+        "INTERNET",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

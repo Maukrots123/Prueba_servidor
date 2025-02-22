@@ -27,14 +27,25 @@ export default function App() {
   const getOwnIp = async () => {
     try {
       setIsLoading(true);
-      const ip = await Network.getIpAddressAsync();
-      setServerIp(ip);
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo obtener la IP local.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+       // Nuevo: Verificar conexión a Internet primero
+       const networkState = await Network.getNetworkStateAsync();
+       if (!networkState.isConnected) {
+         Alert.alert('Error', '¡No hay conexión a Internet!');
+         return;
+       }
+       
+       // Mejorado: Intentar múltiples métodos para obtener IP
+       let ip = await Network.getIpAddressAsync();
+       if (!ip || ip.startsWith('0.0.0.0')) {
+         ip = '192.168.43.1';  // Fallback para hotspots comunes
+       }
+       setServerIp(ip);
+     } catch (error) {
+       Alert.alert('Error', 'No se pudo obtener la IP: ' + error.message);
+     } finally {
+       setIsLoading(false);
+     }
+   };
 
   const getLocationPermission = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -74,17 +85,30 @@ export default function App() {
       });
     });
 
-    server.on('error', (error) => {
-      Alert.alert('Error', 'Error del servidor: ${error.message}');
-      setIsLoading(false);
-    });
-
-    server.listen(5000, serverIp, () => {
-      console.log('Servidor activo en:', serverIp);
-      setConnectionStatus('Esperando conexiones...');
-      setIsLoading(false);
-      setSocket(server);
-    });
+       // Nuevo: Manejo detallado de errores del servidor
+       newServer.on('error', (error) => {
+        let errorMessage = 'Error del servidor: ';
+        switch(error.code) {
+          case 'EADDRINUSE':
+            errorMessage += 'Puerto 5000 ocupado. Reinicia el dispositivo o cambia el puerto.';
+            break;
+          case 'EACCES':
+            errorMessage += 'Permisos de red denegados. Verifica la configuración de Android.';
+            break;
+          default:
+            errorMessage += error.message;
+        }
+        Alert.alert('Error crítico', errorMessage);
+        setIsLoading(false);
+      });
+  
+      // Modificado: Escucha en todas las interfaces de red
+      newServer.listen(5000, '0.0.0.0', () => {
+        console.log('Servidor activo en:', serverIp + ':5000');
+        setConnectionStatus('Escuchando en ${serverIp}:5000');
+        setIsLoading(false);
+        setSocket(newServer);
+      });
   };
 
   const connectAsClient = () => {
@@ -94,14 +118,26 @@ export default function App() {
     }
 
     setIsLoading(true);
-    const client = TcpSocket.createConnection({ port: 5000, host: serverIp }, () => {
+    const client = TcpSocket.createConnection({ port: 5000, host: serverIp, timeout: 10000 }, () => {
       setMode('client_connected');
       setIsLoading(false);
       setSocket(client);
     });
 
+    // Mejorado: Manejo específico de errores del cliente
     client.on('error', (error) => {
-      Alert.alert('Error', 'Error de conexión: ${error.message}');
+      let errorMessage = 'Error de conexión: ';
+      switch(error.code) {
+        case 'ECONNREFUSED':
+          errorMessage += 'Servidor no encontrado. Verifica IP/puerto.';
+          break;
+        case 'ETIMEDOUT':
+          errorMessage += 'Tiempo de espera agotado. El servidor no responde.';
+          break;
+        default:
+          errorMessage += error.message;
+      }
+      Alert.alert('Error', errorMessage);
       setIsLoading(false);
     });
   };
