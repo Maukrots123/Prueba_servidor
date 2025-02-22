@@ -75,6 +75,7 @@ export default function App() {
 
     setIsLoading(true);
     const server = TcpSocket.createServer((clientSocket) => {
+
       clientSocket.on('data', (data) => {
         const receivedData = data.toString();
         setReceivedMessages(prev => [...prev, data.toString()]);
@@ -87,6 +88,14 @@ export default function App() {
 
        // Nuevo: Manejo detallado de errores del servidor
        server.on('error', (error) => {
+        const errorCode = error.code || 'UNKNOWN';
+        const errorMsg = error.message || 'Sin detalles';
+        console.log('ERROR del servidor:', {
+          code: error.code,
+          message: error.message,
+          stack: error.stack
+        });
+
         let errorMessage = 'Error del servidor: ';
         switch(error.code) {
           case 'EADDRINUSE':
@@ -103,7 +112,7 @@ export default function App() {
       });
   
       // Modificado: Escucha en todas las interfaces de red
-      server.listen(5000, '0.0.0.0', () => {
+      server.listen(8080, '0.0.0.0', () => {
         console.log('Servidor activo en:', serverIp + ':5000');
         setConnectionStatus(`Escuchando en ${serverIp}:5000`);
         setIsLoading(false);
