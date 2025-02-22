@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, StyleSheet, TextInput, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, Button, StyleSheet, TextInput, Alert, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
 import TcpSocket from 'react-native-tcp-socket';
 import * as Network from 'expo-network';
 import * as Location from 'expo-location';
@@ -7,25 +7,22 @@ import * as Location from 'expo-location';
 export default function App() {
   const [mode, setMode] = useState('menu');
   const [serverIp, setServerIp] = useState('');
-  const [ws, setWs] = useState(null);
+  const [socket, setSocket] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('Desconectado');
   const [isLoading, setIsLoading] = useState(false);
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
   const [message, setMessage] = useState('');
-  const [locationPermission, setLocationPermission] = useState(false);
+  const [receivedMessages, setReceivedMessages] = useState([]);
 
   useEffect(() => {
-    if (mode === 'server') {
-      getOwnIp();
-    }
-    if (mode === 'client') {
-      getLocationPermission();
-    }
     return () => {
-      if (ws) ws.close();
+      if (socket) {
+        socket.destroy();
+        setSocket(null);
+      }
     };
-  }, [mode]);
+  }, [socket]);
 
   const getOwnIp = async () => {
     try {
@@ -41,174 +38,236 @@ export default function App() {
 
   const getLocationPermission = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status === 'granted') {
-      setLocationPermission(true);
-    } else {
+    if (status !== 'granted') {
       Alert.alert('Error', 'Se requiere permiso para acceder a la ubicación.');
+      return false;
+    }
+    return true;
+  };
+
+  const getLocation = async () => {
+    try {
+      const location = await Location.getCurrentPositionAsync({});
+      setLatitude(location.coords.latitude);
+      setLongitude(location.coords.longitude);
+      Alert.alert('Éxito', 'Ubicación obtenida correctamente');
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo obtener la ubicación');
     }
   };
 
   const startServer = () => {
-    setIsLoading(true);
-    try {
-      const server = TcpSocket.createServer((socket) => {
-        console.log('Cliente conectado');
-
-        socket.on('data', (data) => {
-          console.log('Mensaje recibido:', data.toString());
-        });
-
-        socket.on('close', () => {
-          console.log('Conexión cerrada');
-        });
-
-        socket.write('¡Conexión exitosa!');
-      });
-
-      server.listen(5000, serverIp, () => {
-        console.log('Servidor iniciado en:', serverIp);
-        setConnectionStatus('Servidor activo');
-        setIsLoading(false);
-      });
-
-      setWs(server);
-    } catch (error) {
-      console.error('Error al iniciar el servidor:', error);
-      Alert.alert('Error', 'No se pudo iniciar el servidor.');
-      setIsLoading(false);
+    if (!serverIp) {
+      Alert.alert('Error', 'La IP del servidor no está configurada');
+      return;
     }
+
+    setIsLoading(true);
+    const server = TcpSocket.createServer((clientSocket) => {
+      clientSocket.on('data', (data) => {
+        const receivedData = data.toString();
+        setReceivedMessages(prev => [...prev, receivedData]);
+      });
+
+      clientSocket.on('close', () => {
+        console.log('Cliente desconectado');
+      });
+    });
+
+    server.on('error', (error) => {
+      Alert.alert('Error', 'Error del servidor: ${error.message}');
+      setIsLoading(false);
+    });
+
+    server.listen(5000, serverIp, () => {
+      console.log('Servidor activo en:', serverIp);
+      setConnectionStatus('Esperando conexiones...');
+      setIsLoading(false);
+      setSocket(server);
+    });
   };
 
   const connectAsClient = () => {
     if (!serverIp) {
-      Alert.alert('Error', 'Ingresa la IP del servidor.');
+      Alert.alert('Error', 'Ingresa la IP del servidor');
       return;
     }
 
     setIsLoading(true);
     const client = TcpSocket.createConnection({ port: 5000, host: serverIp }, () => {
-      console.log('Conectado al servidor');
-      setConnectionStatus('Conectado');
+      setMode('client_connected');
       setIsLoading(false);
-      client.write('¡Hola desde el cliente!');
+      setSocket(client);
     });
 
-    client.on('data', (data) => {
-      console.log('Respuesta del servidor:', data.toString());
-      setConnectionStatus('Mensaje recibido: ' + data.toString());
-    });
-
-    client.on('error', (err) => {
-      setConnectionStatus('Error al conectar');
+    client.on('error', (error) => {
+      Alert.alert('Error', 'Error de conexión: ${error.message}');
       setIsLoading(false);
-      Alert.alert('Error de conexión', 'No se pudo conectar al servidor.');
     });
-
-    setWs(client);
   };
 
-  const sendMessage = () => {
-    if (ws) {
-      ws.write(message);
+  const sendData = (data) => {
+    if (socket) {
+      socket.write(data);
       setMessage('');
     }
   };
 
   const sendLocation = () => {
     if (latitude && longitude) {
-      const locationData = 'Latitud: ${latitude}, Longitud: ${longitude}';
-      if (ws) {
-        ws.write(locationData);
-      }
+      sendData('[UBICACIÓN] Lat: ${latitude}, Long: ${longitude}');
     } else {
-      Alert.alert('Ubicación no disponible', 'No se ha obtenido la ubicación aún.');
+      Alert.alert('Error', 'Primero obtén tu ubicación');
     }
   };
 
-  const disconnectAndGoBack = () => {
-    if (ws) ws.close();
-    setWs(null);
-    setConnectionStatus('Desconectado');
+  const disconnect = () => {
+    if (socket) {
+      socket.destroy();
+      setSocket(null);
+    }
+    setReceivedMessages([]);
     setMode('menu');
     setServerIp('');
   };
 
-  if (mode === 'menu') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Seleccione Modo</Text>
-        <Button title="Servidor" onPress={() => setMode('server')} />
-        <View style={styles.spacer} />
-        <Button title="Cliente" onPress={() => setMode('client')} />
-      </View>
-    );
-  }
+  return (
+    <View style={styles.container}>
+      {mode === 'menu' && (
+        <>
+          <Text style={styles.title}>Seleccione Modo</Text>
+          <Button title="Servidor" onPress={() => { setMode('server'); getOwnIp(); }} />
+          <View style={styles.spacer} />
+          <Button title="Cliente" onPress={() => setMode('client')} />
+        </>
+      )}
 
-  if (mode === 'server') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Modo Servidor</Text>
-        <Text style={styles.label}>IP del Servidor: {serverIp}</Text>
-        <Text style={styles.label}>Estado de Conexión: {connectionStatus}</Text>
-        <View style={styles.spacer} />
-        {isLoading ? (
-          <ActivityIndicator size="large" color="#0000ff" />
-        ) : (
-          !ws && <Button title="Iniciar Servidor" onPress={startServer} />
-        )}
-        <View style={styles.spacer} />
-        <Button title="Regresar al menú principal" onPress={disconnectAndGoBack} />
-      </View>
-    );
-  }
+      {mode === 'server' && (
+        <>
+          <Text style={styles.title}>Modo Servidor</Text>
+          <Text style={styles.subtitle}>IP: {serverIp}</Text>
+          <Text style={styles.status}>Estado: {connectionStatus}</Text>
+          
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#0000ff" />
+          ) : (
+            !socket && <Button title="Iniciar Servidor" onPress={startServer} />
+          )}
 
-  if (mode === 'client') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Modo Cliente</Text>
-        <Text style={styles.label}>Estado de Conexión: {connectionStatus}</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Ingresa IP del Servidor"
-          value={serverIp}
-          onChangeText={setServerIp}
-          autoCapitalize="none"
-        />
-        <View style={styles.spacer} />
-        {isLoading ? (
-          <ActivityIndicator size="large" color="#0000ff" />
-        ) : (
-          !ws && <Button title="Conectar al Servidor" onPress={connectAsClient} />
-        )}
-        <View style={styles.spacer} />
-        {ws && (
-          <>
-            <TextInput
-              style={styles.input}
-              placeholder="Escribe tu mensaje"
-              value={message}
-              onChangeText={setMessage}
-            />
-            <Button title="Enviar Mensaje" onPress={sendMessage} />
-            <TouchableOpacity style={styles.locationButton} onPress={getLocation}>
-              <Text style={styles.locationButtonText}>Obtener Ubicación</Text>
-            </TouchableOpacity>
-            <Button title="Enviar Ubicación" onPress={sendLocation} />
-          </>
-        )}
-        <View style={styles.spacer} />
-        <Button title="Regresar al menú principal" onPress={disconnectAndGoBack} />
-      </View>
-    );
-  }
+          <ScrollView style={styles.messagesContainer}>
+            {receivedMessages.map((msg, index) => (
+              <Text key={index} style={styles.message}>{msg}</Text>
+            ))}
+          </ScrollView>
+
+          <Button title="Volver al menú" onPress={disconnect} />
+        </>
+      )}
+
+      {mode === 'client' && (
+        <>
+          <Text style={styles.title}>Modo Cliente</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="IP del servidor"
+            value={serverIp}
+            onChangeText={setServerIp}
+            autoCapitalize="none"
+          />
+          
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#0000ff" />
+          ) : (
+            <Button title="Conectar" onPress={connectAsClient} />
+          )}
+          
+          <Button title="Volver" onPress={disconnect} />
+        </>
+      )}
+
+      {mode === 'client_connected' && (
+        <>
+          <Text style={styles.title}>Modo Cliente - Conectado</Text>
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Escribe un mensaje"
+            value={message}
+            onChangeText={setMessage}
+          />
+          
+          <Button title="Enviar Mensaje" onPress={() => sendData(message)} />
+          
+          <TouchableOpacity style={styles.button} onPress={getLocation}>
+            <Text style={styles.buttonText}>Obtener Ubicación</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.button} onPress={sendLocation}>
+            <Text style={styles.buttonText}>Enviar Ubicación</Text>
+          </TouchableOpacity>
+          
+          <Button title="Desconectar" onPress={disconnect} />
+        </>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#fff', alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
-  label: { fontSize: 18, marginVertical: 10 },
-  input: { height: 40, borderColor: 'gray', borderWidth: 1, width: '100%', marginBottom: 10, paddingHorizontal: 10, textAlign: 'center' },
-  spacer: { height: 15 },
-  locationButton: { backgroundColor: '#4CAF50', padding: 10, marginVertical: 10, borderRadius: 5 },
-  locationButtonText: { color: '#fff', fontSize: 16 },
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginVertical: 20,
+    textAlign: 'center'
+  },
+  subtitle: {
+    fontSize: 18,
+    textAlign: 'center',
+    marginBottom: 10
+  },
+  status: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20
+  },
+  input: {
+    height: 40,
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 5,
+    marginBottom: 15,
+    paddingHorizontal: 10
+  },
+  button: {
+    backgroundColor: '#2196F3',
+    padding: 15,
+    borderRadius: 5,
+    marginVertical: 10
+  },
+  buttonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontWeight: 'bold'
+  },
+  spacer: {
+    height: 15
+  },
+  messagesContainer: {
+    flex: 1,
+    marginVertical: 20,
+    width: '100%'
+  },
+  message: {
+    fontSize: 16,
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    marginVertical: 5,
+    borderRadius: 5
+  }
 });
