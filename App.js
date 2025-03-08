@@ -1,27 +1,29 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Button, TextInput, PermissionsAndroid } from "react-native";
+import { View, Text, TextInput, Button, Alert } from "react-native";
 import TcpSocket from "react-native-tcp-socket";
-import Geolocation from "@react-native-community/geolocation";
 import { NetworkInfo } from "react-native-network-info";
+import * as Location from 'expo-location';
 
 export default function App() {
-  const [screen, setScreen] = useState(null);
+  const [screen, setScreen] = useState("home");
 
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-      {!screen && (
+      {screen === "home" && (
         <>
-          <Button title="Iniciar como Servidor" onPress={() => setScreen("server")} />
-          <Button title="Iniciar como Cliente" onPress={() => setScreen("client")} />
+          <Text style={{ fontSize: 20, marginBottom: 20 }}>Selecciona un modo:</Text>
+          <Button title="Servidor" onPress={() => setScreen("server")} />
+          <View style={{ height: 10 }} />
+          <Button title="Cliente" onPress={() => setScreen("client")} />
         </>
       )}
-      {screen === "server" && <Server onBack={() => setScreen(null)} />}
-      {screen === "client" && <Client onBack={() => setScreen(null)} />}
+      {screen === "server" && <Server onBack={() => setScreen("home")} />}
+      {screen === "client" && <Client onBack={() => setScreen("home")} />}
     </View>
   );
 }
 
-// ========================= SERVIDOR =========================
+// ================= SERVIDOR ===================
 function Server({ onBack }) {
   const [receivedText, setReceivedText] = useState("");
   const [location, setLocation] = useState(null);
@@ -39,10 +41,8 @@ function Server({ onBack }) {
         if (message.startsWith("LOC:")) {
           const [lat, lon] = message.replace("LOC:", "").split(",");
           setLocation({ lat, lon });
-        } else if (message.startsWith("ADD:")) {
-          setReceivedText((prev) => prev + message.replace("ADD:", ""));
-        } else if (message === "DEL") {
-          setReceivedText((prev) => prev.slice(0, -1));
+        } else {
+          setReceivedText((prev) => prev + message);
         }
       });
 
@@ -70,70 +70,88 @@ function Server({ onBack }) {
   );
 }
 
-// ========================= CLIENTE =========================
+// ================= CLIENTE ===================
 function Client({ onBack }) {
   const [text, setText] = useState("");
   const [socket, setSocket] = useState(null);
+  const [serverIP, setServerIP] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const connectToServer = () => {
+    if (!serverIP) {
+      Alert.alert("Error", "Ingresa la IP del servidor");
+      return;
+    }
+
     const client = TcpSocket.createConnection(
-      { port: 8080, host: "192.168.1.101" }, // Cambia por la IP del servidor
-      () => console.log("Conectado al servidor")
+      { port: 8080, host: serverIP },
+      () => {
+        console.log("Conectado al servidor en", serverIP);
+        setIsConnected(true);
+      }
     );
 
+    client.on("error", (err) => {
+      console.error("Error en cliente:", err.message);
+      setError("Error de conexión");
+      setIsConnected(false);
+    });
+
+    client.on("close", () => {
+      console.log("Conexión cerrada");
+      setError("Desconectado del servidor");
+      setIsConnected(false);
+    });
+
     setSocket(client);
-
-    obtenerUbicacion(client);
-
-    return () => client.destroy();
-  }, []);
-
-  const handleTextChange = (value) => {
-    if (!socket) return;
-
-    if (value.length > text.length) {
-      const newChar = value.slice(-1);
-      socket.write(`ADD:${newChar}`);
-    } else if (value.length < text.length) {
-      socket.write("DEL");
-    }
-
-    setText(value);
   };
 
-  const obtenerUbicacion = async (client) => {
-    try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-      );
-
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        Geolocation.getCurrentPosition(
-          (position) => {
-            const coords = `LOC:${position.coords.latitude},${position.coords.longitude}`;
-            client.write(coords);
-          },
-          (error) => console.log("Error obteniendo ubicación:", error),
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
-        );
-      } else {
-        console.log("Permiso de ubicación denegado");
-      }
-    } catch (err) {
-      console.warn(err);
+  const sendLocation = async () => {
+    if (!socket || !isConnected) return;
+    
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permiso Denegado", "No podemos acceder a la ubicación.");
+      return;
     }
+
+    let location = await Location.getCurrentPositionAsync({});
+    const coords = `LOC:${location.coords.latitude},${location.coords.longitude}`;
+    socket.write(coords);
+    Alert.alert("Ubicación Enviada", coords);
   };
 
   return (
     <View style={{ padding: 20, alignItems: "center" }}>
-      <Text style={{ fontSize: 18 }}>Cliente - Escribe algo:</Text>
-      <TextInput
-        style={{ borderWidth: 1, padding: 10, marginTop: 10, width: "80%" }}
-        value={text}
-        onChangeText={handleTextChange}
-        autoFocus
-      />
-      <Button title="Salir" onPress={() => { socket.destroy(); onBack(); }} />
+      {!isConnected ? (
+        <>
+          <Text style={{ fontSize: 18 }}>Ingresa la IP del servidor:</Text>
+          <TextInput
+            style={{ borderWidth: 1, padding: 10, marginTop: 10, width: "80%" }}
+            placeholder="Ejemplo: 192.168.1.101"
+            value={serverIP}
+            onChangeText={setServerIP}
+          />
+          <Button title="Conectar" onPress={connectToServer} />
+        </>
+      ) : (
+        <>
+          <Text style={{ fontSize: 18 }}>Cliente - Escribe algo:</Text>
+          {error && <Text style={{ color: "red" }}>{error}</Text>}
+          <TextInput
+            style={{ borderWidth: 1, padding: 10, marginTop: 10, width: "80%" }}
+            value={text}
+            onChangeText={(value) => {
+              if (!socket || error) return;
+              socket.write(`MSG:${value}`);
+              setText(value);
+            }}
+          />
+          <Button title="Enviar Ubicación" onPress={sendLocation} />
+          <Button title="Salir" onPress={() => { socket.destroy(); onBack(); }} />
+        </>
+      )}
     </View>
   );
 }
