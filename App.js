@@ -37,12 +37,12 @@ function Server({ onBack }) {
       console.log("Cliente conectado:", socket.remoteAddress);
 
       socket.on("data", (data) => {
-        const message = data.toString();
+        const message = data.toString().trim();
         if (message.startsWith("LOC:")) {
           const [lat, lon] = message.replace("LOC:", "").split(",");
           setLocation({ lat, lon });
         } else {
-          setReceivedText((prev) => prev + message);
+          setReceivedText(message); // Actualiza el mensaje en tiempo real
         }
       });
 
@@ -64,7 +64,11 @@ function Server({ onBack }) {
       <Text style={{ fontSize: 18 }}>Servidor en ejecución</Text>
       <Text style={{ marginTop: 10 }}>IP del servidor: {serverIP}</Text>
       <Text style={{ marginTop: 10 }}>Texto recibido: {receivedText}</Text>
-      {location && <Text>Ubicación: {location.lat}, {location.lon}</Text>}
+      {location && (
+        <Text>
+          Ubicación:{"\n"}Latitud: {location.lat}{"\n"}Longitud: {location.lon}
+        </Text>
+      )}
       <Button title="Salir" onPress={() => { server.close(); onBack(); }} />
     </View>
   );
@@ -119,7 +123,7 @@ function Client({ onBack }) {
     let location = await Location.getCurrentPositionAsync({});
     const coords = `LOC:${location.coords.latitude},${location.coords.longitude}`;
     socket.write(coords);
-    Alert.alert("Ubicación Enviada", coords);
+    Alert.alert("Ubicación Enviada", `Lat: ${location.coords.latitude}, Lon: ${location.coords.longitude}`);
   };
 
   return (
@@ -143,13 +147,17 @@ function Client({ onBack }) {
             style={{ borderWidth: 1, padding: 10, marginTop: 10, width: "80%" }}
             value={text}
             onChangeText={(value) => {
-              if (!socket || error) return;
-              socket.write(`MSG:${value}`);
               setText(value);
+              if (socket && !error) socket.write(value); // Envía cada cambio en tiempo real
             }}
           />
+          <View style={{ marginTop: 15}}>
           <Button title="Enviar Ubicación" onPress={sendLocation} />
+          </View>
+
+          <View style={{ marginTop: 20}}>
           <Button title="Salir" onPress={() => { socket.destroy(); onBack(); }} />
+          </View>
         </>
       )}
     </View>
