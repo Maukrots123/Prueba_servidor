@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { View, Text, Button } from "react-native";
 import TcpSocket from "react-native-tcp-socket";
@@ -18,11 +17,13 @@ export default function Server({ onBack }) {
 
       socket.on("data", (data) => {
         const message = data.toString().trim();
-        if (message.startsWith("LOC:")) {
-          const [lat, lon] = message.replace("LOC:", "").split(",");
+        const parts = message.split(",");
+
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          const [lat, lon] = parts;
           setLocation({ lat, lon });
         } else {
-          setReceivedText(message); // Actualiza el mensaje en tiempo real
+          setReceivedText(message);
         }
       });
 

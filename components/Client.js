@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import { View, Text, TextInput, Button, Alert } from "react-native";
 import TcpSocket from "react-native-tcp-socket";
@@ -50,7 +49,7 @@ export default function Client({ onBack }) {
     }
 
     let location = await Location.getCurrentPositionAsync({});
-    const coords = `LOC:${location.coords.latitude},${location.coords.longitude}`;
+    const coords = `${location.coords.latitude},${location.coords.longitude}`;
     socket.write(coords);
     Alert.alert("Ubicación Enviada", `Lat: ${location.coords.latitude}, Lon: ${location.coords.longitude}`);
   };
@@ -67,6 +66,9 @@ export default function Client({ onBack }) {
             onChangeText={setServerIP}
           />
           <Button title="Conectar" onPress={connectToServer} />
+          <View style={{ marginTop: 15 }}>
+            <Button title="Salir" onPress={onBack} />
+          </View>
         </>
       ) : (
         <>
@@ -77,7 +79,7 @@ export default function Client({ onBack }) {
             value={text}
             onChangeText={(value) => {
               setText(value);
-              if (socket && !error) socket.write(value); // Envía cada cambio en tiempo real
+              if (socket && !error) socket.write(value);
             }}
           />
           <View style={{ marginTop: 15 }}>
